@@ -1,8 +1,10 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import Header from '@/components/Header'
 import { BackIcon, PlusCircle } from '@/components/Icons'
 import { useAuth } from '@/hooks/useAuth'
+import { generateQuestions } from '@/lib/aiApi'
+import { supabase } from '@/lib/supabase'
 
 // หน่วยการเรียนฟิสิกส์
 const UNITS = [
@@ -20,16 +22,69 @@ const UNITS = [
   { id: 12, title: 'แม่เหล็กไฟฟ้า',              chapter: 'บทที่ 12' },
 ]
 
+const LEVELS = [
+  { value: '1', label: 'ง่าย' },
+  { value: '2', label: 'ปานกลาง' },
+  { value: '3', label: 'ยาก' },
+]
+
 export default function CreateQuiz() {
   const { user } = useAuth()
+  const navigate = useNavigate()
 
   const [selectedUnit, setSelectedUnit] = useState<number | null>(null)
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [count, setCount] = useState('10')
+  const [level, setLevel] = useState('2')
   const [description, setDescription] = useState('')
 
+  const [loading, setLoading] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
+
   const unit = UNITS.find(u => u.id === selectedUnit)
+
+  async function handleGenerate() {
+    if (!unit || !user) return
+    setLoading(true)
+    setErrorMsg('')
+
+    try {
+      // 1. เรียก AI backend ให้สร้างโจทย์ตามหน่วยที่เลือก
+      const aiResult = await generateQuestions(unit.title, level, Number(count) || 10)
+
+      // 2. บันทึกลงตาราง homework ใน Supabase
+      const { error } = await supabase.from('homework').insert({
+        h_name: `${unit.chapter}: ${unit.title}`,
+        h_tid: user.id,
+        h_subject: unit.title,
+        h_bloom_taxonomy: null,
+        h_type: 'auto_generated',
+        h_score: 100,
+        h_enable_streak: true,
+        h_content: {
+          questions: aiResult.questions,
+          start_date: startDate,
+          end_date: endDate,
+          description,
+        },
+      })
+
+      if (error) {
+        console.error('Supabase insert error:', error)
+        setErrorMsg('บันทึกแบบฝึกหัดไม่สำเร็จ กรุณาลองใหม่')
+        return
+      }
+
+      // สำเร็จ — กลับไปหน้าแดชบอร์ดครู
+      navigate('/teacher')
+    } catch (err) {
+      console.error('Generate error:', err)
+      setErrorMsg('สร้างโจทย์ไม่สำเร็จ กรุณาลองใหม่ (อาจเกิดจากเซิร์ฟเวอร์ AI กำลังปลุกตัวเอง รอสักครู่แล้วลองอีกครั้ง)')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <>
@@ -101,6 +156,19 @@ export default function CreateQuiz() {
                 onChange={e => setCount(e.target.value)}
               />
             </div>
+            <div className="field">
+              <label className="label">ระดับความยาก</label>
+              <select
+                className="input"
+                value={level}
+                onChange={e => setLevel(e.target.value)}
+                style={{ cursor: 'pointer' }}
+              >
+                {LEVELS.map(l => (
+                  <option key={l.value} value={l.value}>{l.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="field">
@@ -113,14 +181,21 @@ export default function CreateQuiz() {
             />
           </div>
 
+          {errorMsg && (
+            <div style={{ textAlign: 'center', marginTop: 12, fontSize: 14, color: 'var(--danger, #e05252)' }}>
+              ⚠️ {errorMsg}
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
             <button
               className="btn btn-primary"
-              style={{ padding: '16px 40px', fontSize: 16, opacity: selectedUnit ? 1 : 0.4 }}
-              disabled={!selectedUnit}
+              style={{ padding: '16px 40px', fontSize: 16, opacity: selectedUnit && !loading ? 1 : 0.4 }}
+              disabled={!selectedUnit || loading}
+              onClick={handleGenerate}
             >
               <PlusCircle />
-              สร้างโจทย์อัตโนมัติ
+              {loading ? 'กำลังสร้างโจทย์... (อาจใช้เวลาสักครู่)' : 'สร้างโจทย์อัตโนมัติ'}
             </button>
           </div>
           {!selectedUnit && (
