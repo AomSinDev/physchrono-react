@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import Header from '@/components/Header'
 import { BackIcon, PlusCircle } from '@/components/Icons'
@@ -28,6 +28,20 @@ const LEVELS = [
   { value: '3', label: 'ยาก' },
 ]
 
+interface ClassRow {
+  c_id: number
+  c_name: string
+  c_join_code: string
+  c_students: number[]
+}
+
+function generateJoinCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  let code = ''
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)]
+  return code
+}
+
 export default function CreateQuiz() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -39,45 +53,135 @@ export default function CreateQuiz() {
   const [level, setLevel] = useState('2')
   const [description, setDescription] = useState('')
 
+  const [classes, setClasses] = useState<ClassRow[]>([])
+  const [selectedClassId, setSelectedClassId] = useState<number | null>(null)
+  const [newClassName, setNewClassName] = useState('')
+  const [creatingClass, setCreatingClass] = useState(false)
+
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  const [successMsg, setSuccessMsg] = useState('')
 
   const unit = UNITS.find(u => u.id === selectedUnit)
 
+  useEffect(() => {
+    if (user) loadClasses()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  async function loadClasses() {
+    if (!user) return
+    const { data, error } = await supabase
+      .from('classs')
+      .select('c_id, c_name, c_join_code, c_students')
+      .eq('c_tid', user.id)
+      .order('c_created_at', { ascending: false })
+
+    if (!error && data) {
+      setClasses(data as ClassRow[])
+      if (data.length > 0 && selectedClassId === null) {
+        setSelectedClassId(data[0].c_id)
+      }
+    }
+  }
+
+  async function handleCreateClass() {
+    if (!newClassName.trim() || !user) return
+    setCreatingClass(true)
+    try {
+      const { data, error } = await supabase
+        .from('classs')
+        .insert({
+          c_name: newClassName.trim(),
+          c_tid: user.id,
+          c_join_code: generateJoinCode(),
+          c_students: [],
+        })
+        .select()
+        .single()
+
+      if (error) {
+        console.error(error)
+        setErrorMsg('สร้างห้องเรียนไม่สำเร็จ')
+        return
+      }
+
+      setNewClassName('')
+      await loadClasses()
+      if (data) setSelectedClassId(data.c_id)
+    } finally {
+      setCreatingClass(false)
+    }
+  }
+
   async function handleGenerate() {
     if (!unit || !user) return
+    if (!selectedClassId) {
+      setErrorMsg('กรุณาเลือกหรือสร้างห้องเรียนก่อน')
+      return
+    }
     setLoading(true)
     setErrorMsg('')
+    setSuccessMsg('')
 
     try {
       // 1. เรียก AI backend ให้สร้างโจทย์ตามหน่วยที่เลือก
       const aiResult = await generateQuestions(unit.title, level, Number(count) || 10)
 
-      // 2. บันทึกลงตาราง homework ใน Supabase
-      const { error } = await supabase.from('homework').insert({
-        h_name: `${unit.chapter}: ${unit.title}`,
-        h_tid: user.id,
-        h_subject: unit.title,
-        h_bloom_taxonomy: null,
-        h_type: 'auto_generated',
-        h_score: 100,
-        h_enable_streak: true,
-        h_content: {
-          questions: aiResult.questions,
-          start_date: startDate,
-          end_date: endDate,
-          description,
-        },
-      })
+      const homeworkContent = {
+        questions: aiResult.questions,
+        start_date: startDate,
+        end_date: endDate,
+        description,
+      }
 
-      if (error) {
-        console.error('Supabase insert error:', error)
+      // 2. บันทึกลงตาราง homework ใน Supabase — ขอ id กลับมาด้วย
+      const { data: hwData, error: hwError } = await supabase
+        .from('homework')
+        .insert({
+          h_name: `${unit.chapter}: ${unit.title}`,
+          h_tid: user.id,
+          h_subject: unit.title,
+          h_bloom_taxonomy: null,
+          h_type: 'auto_generated',
+          h_score: 100,
+          h_enable_streak: true,
+          h_content: homeworkContent,
+        })
+        .select()
+        .single()
+
+      if (hwError || !hwData) {
+        console.error('Supabase insert error:', hwError)
         setErrorMsg('บันทึกแบบฝึกหัดไม่สำเร็จ กรุณาลองใหม่')
         return
       }
 
-      // สำเร็จ — กลับไปหน้าแดชบอร์ดครู
-      navigate('/teacher')
+      // 3. มอบหมายงานให้นักเรียนทุกคนในห้องที่เลือก (สร้างแถวใน actives)
+      const targetClass = classes.find(c => c.c_id === selectedClassId)
+      const studentIds: number[] = targetClass?.c_students ?? []
+
+      if (studentIds.length > 0) {
+        const activesRows = studentIds.map(sid => ({
+          a_sid: sid,
+          a_cid: selectedClassId,
+          a_hid: hwData.h_id,
+          a_homework: homeworkContent,
+          a_score: 0,
+          a_type: 'assigned',
+        }))
+        const { error: actError } = await supabase.from('actives').insert(activesRows)
+        if (actError) {
+          console.error('actives insert error:', actError)
+          setErrorMsg('สร้างชุดฝึกสำเร็จ แต่มอบหมายให้นักเรียนไม่สำเร็จบางส่วน')
+          return
+        }
+        setSuccessMsg(`สร้างชุดฝึกและมอบหมายให้นักเรียน ${studentIds.length} คนเรียบร้อยแล้ว`)
+      } else {
+        setSuccessMsg('สร้างชุดฝึกสำเร็จ แต่ห้องนี้ยังไม่มีนักเรียนเข้าร่วม (แชร์รหัสห้องให้นักเรียนก่อน)')
+      }
+
+      setTimeout(() => navigate('/teacher'), 1500)
     } catch (err) {
       console.error('Generate error:', err)
       setErrorMsg('สร้างโจทย์ไม่สำเร็จ กรุณาลองใหม่ (อาจเกิดจากเซิร์ฟเวอร์ AI กำลังปลุกตัวเอง รอสักครู่แล้วลองอีกครั้ง)')
@@ -107,6 +211,48 @@ export default function CreateQuiz() {
                   </>
                 : <span style={{ color: 'var(--text-3)' }}>เลือกหน่วยการเรียนก่อน</span>
               }
+            </div>
+          </div>
+
+          {/* เลือกห้องเรียน */}
+          <div className="field" style={{ marginTop: 16 }}>
+            <label className="label">🏫 มอบหมายให้ห้องเรียน</label>
+            {classes.length > 0 ? (
+              <select
+                className="input"
+                value={selectedClassId ?? ''}
+                onChange={e => setSelectedClassId(Number(e.target.value))}
+                style={{ cursor: 'pointer' }}
+              >
+                {classes.map(c => (
+                  <option key={c.c_id} value={c.c_id}>
+                    {c.c_name} · รหัส {c.c_join_code} · นักเรียน {c.c_students?.length ?? 0} คน
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 8 }}>
+                ยังไม่มีห้องเรียน สร้างห้องใหม่ก่อนด้านล่าง
+              </div>
+            )}
+
+            {/* สร้างห้องเรียนใหม่แบบเร็ว */}
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <input
+                className="input"
+                placeholder="ชื่อห้องเรียนใหม่ เช่น ม.6/1 ฟิสิกส์"
+                value={newClassName}
+                onChange={e => setNewClassName(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={!newClassName.trim() || creatingClass}
+                onClick={handleCreateClass}
+              >
+                {creatingClass ? 'กำลังสร้าง...' : '+ สร้างห้อง'}
+              </button>
             </div>
           </div>
 
@@ -186,21 +332,26 @@ export default function CreateQuiz() {
               ⚠️ {errorMsg}
             </div>
           )}
+          {successMsg && (
+            <div style={{ textAlign: 'center', marginTop: 12, fontSize: 14, color: 'var(--success, #3fb950)' }}>
+              ✅ {successMsg}
+            </div>
+          )}
 
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
             <button
               className="btn btn-primary"
-              style={{ padding: '16px 40px', fontSize: 16, opacity: selectedUnit && !loading ? 1 : 0.4 }}
-              disabled={!selectedUnit || loading}
+              style={{ padding: '16px 40px', fontSize: 16, opacity: selectedUnit && selectedClassId && !loading ? 1 : 0.4 }}
+              disabled={!selectedUnit || !selectedClassId || loading}
               onClick={handleGenerate}
             >
               <PlusCircle />
               {loading ? 'กำลังสร้างโจทย์... (อาจใช้เวลาสักครู่)' : 'สร้างโจทย์อัตโนมัติ'}
             </button>
           </div>
-          {!selectedUnit && (
+          {(!selectedUnit || !selectedClassId) && (
             <div style={{ textAlign: 'center', marginTop: 10, fontSize: 13, color: 'var(--text-3)' }}>
-              กรุณาเลือกหน่วยการเรียนก่อน
+              กรุณาเลือกหน่วยการเรียนและห้องเรียนก่อน
             </div>
           )}
         </div>
