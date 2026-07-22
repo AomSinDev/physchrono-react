@@ -1,25 +1,23 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import Header from '@/components/Header'
 import { HomeIcon, BookIcon, CalendarIcon } from '@/components/Icons'
 import { useAuth } from '@/hooks/useAuth'
+import { supabase } from '@/lib/supabase'
 
 // ====== Types ======
 interface Assignment {
-  id: number
+  id: number         // a_id (student) หรือ h_id (teacher)
   title: string
   subject: string
-  dueDate: string // 'YYYY-MM-DD'
+  dueDate: string    // 'YYYY-MM-DD'
   dueTime: string
-  progress?: number   // student only (0-100)
-  studentCount?: number // teacher only
-  submitted?: number    // teacher only
-  priority: 'urgent' | 'soon' | 'normal' // urgent=<3d, soon=<7d, normal
+  progress?: number      // student only (0-100)
+  studentCount?: number  // teacher only
+  submitted?: number     // teacher only
+  priority: 'urgent' | 'soon' | 'normal'
+  activeId?: number // สำหรับ link ไปทำข้อสอบ (student เท่านั้น)
 }
-
-// TODO: ดึงข้อมูลจริงจาก API / Supabase แทน array นี้
-const studentAssignments: Assignment[] = []
-const teacherAssignments: Assignment[] = []
 
 // ====== Helpers ======
 const MONTHS_TH = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม']
@@ -39,6 +37,16 @@ function daysUntil(dueDate: string) {
   const due = new Date(dueDate)
   return Math.ceil((due.getTime() - today.getTime()) / 86400000)
 }
+function priorityOf(dueDate: string): Assignment['priority'] {
+  const d = daysUntil(dueDate)
+  if (d <= 3) return 'urgent'
+  if (d <= 7) return 'soon'
+  return 'normal'
+}
+function toDateOnly(iso: string) {
+  // แปลง ISO timestamp (เช่นจาก created_at) ให้เหลือแค่ YYYY-MM-DD
+  return iso.slice(0, 10)
+}
 
 interface CalendarPageProps {
   role: 'student' | 'teacher'
@@ -51,7 +59,94 @@ export default function CalendarPage({ role }: CalendarPageProps) {
   const [currentMonth, setCurrentMonth] = useState(today.getMonth())
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
 
-  const assignments = role === 'student' ? studentAssignments : teacherAssignments
+  const [assignments, setAssignments] = useState<Assignment[]>([])
+  const [loadingData, setLoadingData] = useState(true)
+
+  useEffect(() => {
+    if (user) loadAssignments()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, role])
+
+  async function loadAssignments() {
+    if (!user) return
+    setLoadingData(true)
+
+    if (role === 'student') {
+      const { data, error } = await supabase
+        .from('actives')
+        .select('a_id, a_type, a_homework, homework(h_name, h_subject, h_created_at)')
+        .eq('a_sid', user.id)
+
+      if (!error && data) {
+        const list: Assignment[] = (data as any[]).map(row => {
+          const hw = Array.isArray(row.homework) ? row.homework[0] : row.homework
+          const dueDate = row.a_homework?.end_date || (hw?.h_created_at ? toDateOnly(hw.h_created_at) : formatDate(today))
+          const progress =
+            row.a_type === 'submitted' || row.a_type === 'done' ? 100 :
+            row.a_type === 'in_progress' ? 50 : 0
+
+          return {
+            id: row.a_id,
+            activeId: row.a_id,
+            title: hw?.h_name ?? 'ชุดฝึก',
+            subject: hw?.h_subject ?? '-',
+            dueDate,
+            dueTime: '-',
+            progress,
+            priority: priorityOf(dueDate),
+          }
+        })
+        setAssignments(list)
+      }
+    } else {
+      const { data: hwData, error } = await supabase
+        .from('homework')
+        .select('h_id, h_name, h_subject, h_content, h_created_at')
+        .eq('h_tid', user.id)
+
+      if (!error && hwData) {
+        const hwIds = hwData.map(h => h.h_id)
+        let countsBySubmit: Record<number, { total: number; submitted: number }> = {}
+
+        if (hwIds.length > 0) {
+          const { data: actData } = await supabase
+            .from('actives')
+            .select('a_hid, a_type')
+            .in('a_hid', hwIds)
+
+          if (actData) {
+            for (const row of actData as { a_hid: number; a_type: string }[]) {
+              if (!countsBySubmit[row.a_hid]) countsBySubmit[row.a_hid] = { total: 0, submitted: 0 }
+              countsBySubmit[row.a_hid].total += 1
+              if (row.a_type === 'submitted' || row.a_type === 'done') {
+                countsBySubmit[row.a_hid].submitted += 1
+              }
+            }
+          }
+        }
+
+        const list: Assignment[] = hwData.map(h => {
+          const content = h.h_content as { end_date?: string } | null
+          const dueDate = content?.end_date || toDateOnly(h.h_created_at)
+          const counts = countsBySubmit[h.h_id] || { total: 0, submitted: 0 }
+
+          return {
+            id: h.h_id,
+            title: h.h_name,
+            subject: h.h_subject ?? '-',
+            dueDate,
+            dueTime: '-',
+            studentCount: counts.total,
+            submitted: counts.submitted,
+            priority: priorityOf(dueDate),
+          }
+        })
+        setAssignments(list)
+      }
+    }
+
+    setLoadingData(false)
+  }
 
   const daysInMonth = getDaysInMonth(currentYear, currentMonth)
   const firstDay = getFirstDayOfMonth(currentYear, currentMonth)
@@ -77,7 +172,6 @@ export default function CalendarPage({ role }: CalendarPageProps) {
 
   const selectedAssignments = selectedDate ? (byDate[selectedDate] || []) : []
 
-  // Sort by dueDate ascending
   const sortedAssignments = [...assignments].sort((a, b) => a.dueDate.localeCompare(b.dueDate))
 
   const priorityColor = (p: Assignment['priority']) => {
@@ -121,7 +215,6 @@ export default function CalendarPage({ role }: CalendarPageProps) {
 
         {/* ── Calendar Grid ── */}
         <div className="card card-glow" style={{ marginBottom: 20 }}>
-          {/* Header */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
             <button onClick={prevMonth} style={navBtnStyle}>‹</button>
             <div style={{ fontFamily: 'Orbitron, sans-serif', fontSize: 16, color: 'var(--cyan)', letterSpacing: 2 }}>
@@ -130,14 +223,12 @@ export default function CalendarPage({ role }: CalendarPageProps) {
             <button onClick={nextMonth} style={navBtnStyle}>›</button>
           </div>
 
-          {/* Day labels */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 8 }}>
             {DAYS_TH.map(d => (
               <div key={d} style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-3)', fontWeight: 600, padding: '4px 0' }}>{d}</div>
             ))}
           </div>
 
-          {/* Day cells */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
             {Array.from({ length: firstDay }).map((_, i) => <div key={`e${i}`} />)}
             {Array.from({ length: daysInMonth }).map((_, i) => {
@@ -188,7 +279,6 @@ export default function CalendarPage({ role }: CalendarPageProps) {
             })}
           </div>
 
-          {/* Legend */}
           <div style={{ display: 'flex', gap: 16, marginTop: 16, paddingTop: 12, borderTop: '1px solid rgba(0,212,255,0.1)', flexWrap: 'wrap' }}>
             {[
               { color: 'var(--danger)', label: 'ด่วน (≤3 วัน)' },
@@ -222,7 +312,11 @@ export default function CalendarPage({ role }: CalendarPageProps) {
         {/* ── Upcoming List ── */}
         <div className="card card-glow">
           <div className="section-title" style={{ marginBottom: 16 }}>📋 ชุดฝึกทั้งหมด — เรียงตามกำหนดส่ง</div>
-          {sortedAssignments.length === 0 ? (
+          {loadingData ? (
+            <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-3)', fontSize: 14 }}>
+              กำลังโหลด...
+            </div>
+          ) : sortedAssignments.length === 0 ? (
             <div style={{
               textAlign: 'center', padding: '48px 24px',
               color: 'var(--text-3)', fontSize: 14,
@@ -255,22 +349,22 @@ function AssignmentItem({ a, role, priorityLabel, priorityColor }: {
   priorityColor: (p: Assignment['priority']) => string
 }) {
   const pl = priorityLabel(a)
-  return (
+
+  const content = (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 14,
       padding: '14px 16px', borderRadius: 12,
       background: 'var(--bg-card-2)',
       border: `1px solid ${priorityColor(a.priority)}33`,
       transition: 'all 0.2s',
+      cursor: role === 'student' ? 'pointer' : 'default',
     }}>
-      {/* Priority bar */}
       <div style={{ width: 3, alignSelf: 'stretch', borderRadius: 4, background: priorityColor(a.priority), flexShrink: 0 }} />
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-1)', marginBottom: 2 }}>{a.title}</div>
         <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{a.subject}</div>
 
-        {/* Student: progress bar */}
         {role === 'student' && typeof a.progress === 'number' && (
           <div style={{ marginTop: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>
@@ -283,21 +377,19 @@ function AssignmentItem({ a, role, priorityLabel, priorityColor }: {
           </div>
         )}
 
-        {/* Teacher: submission count */}
         {role === 'teacher' && typeof a.submitted === 'number' && (
           <div style={{ marginTop: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>
               <span>ส่งแล้ว {a.submitted}/{a.studentCount} คน</span>
-              <span>{Math.round((a.submitted! / a.studentCount!) * 100)}%</span>
+              <span>{a.studentCount ? Math.round((a.submitted! / a.studentCount!) * 100) : 0}%</span>
             </div>
             <div className="progress-bar-wrap" style={{ height: 6 }}>
-              <div className="progress-bar-fill" style={{ width: `${Math.round((a.submitted! / a.studentCount!) * 100)}%` }} />
+              <div className="progress-bar-fill" style={{ width: `${a.studentCount ? Math.round((a.submitted! / a.studentCount!) * 100) : 0}%` }} />
             </div>
           </div>
         )}
       </div>
 
-      {/* Right: due info */}
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
         <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
           {new Date(a.dueDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}
@@ -306,6 +398,15 @@ function AssignmentItem({ a, role, priorityLabel, priorityColor }: {
       </div>
     </div>
   )
+
+  if (role === 'student' && a.activeId) {
+    return (
+      <Link to="/student/quiz" state={{ activeId: a.activeId }} style={{ textDecoration: 'none', color: 'inherit' }}>
+        {content}
+      </Link>
+    )
+  }
+  return content
 }
 
 const navBtnStyle: React.CSSProperties = {
