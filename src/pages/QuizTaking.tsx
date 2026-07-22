@@ -23,6 +23,7 @@ interface HomeworkContent {
   start_date?: string
   end_date?: string
   description?: string
+  student_answers?: Record<number, string>
 }
 
 interface ActiveRow {
@@ -87,10 +88,13 @@ export default function QuizTaking() {
 
     setActive(data as ActiveRow)
 
-    // ถ้าเคยส่งคำตอบไปแล้ว ให้แสดงผลลัพธ์เดิมทันที
+    // ถ้าเคยส่งคำตอบไปแล้ว ให้แสดงผลลัพธ์ + เฉลยเดิมทันที
     if (data.a_type === 'submitted' || data.a_type === 'done') {
-      const total = (data.a_homework?.questions ?? []).length
-      setResult({ score: data.a_score ?? 0, correctCount: 0, total })
+      const qs: Question[] = data.a_homework?.questions ?? []
+      const savedAnswers: Record<number, string> = data.a_homework?.student_answers ?? {}
+      const correctCount = qs.filter(q => savedAnswers[q.id] === q.correct).length
+      setAnswers(savedAnswers)
+      setResult({ score: data.a_score ?? 0, correctCount, total: qs.length })
     }
 
     setLoading(false)
@@ -150,6 +154,7 @@ export default function QuizTaking() {
           a_type: 'submitted',
           a_best_streak: bestStreak,
           a_submitted_at: new Date().toISOString(),
+          a_homework: { ...active.a_homework, student_answers: answers },
         })
         .eq('a_id', active.a_id)
 
@@ -195,7 +200,7 @@ export default function QuizTaking() {
     )
   }
 
-  // หน้าแสดงผลลัพธ์หลังส่งคำตอบ
+  // หน้าแสดงผลลัพธ์ + เฉลยรายข้อ หลังส่งคำตอบ
   if (result) {
     return (
       <>
@@ -206,7 +211,7 @@ export default function QuizTaking() {
             ย้อนกลับ
           </Link>
 
-          <div className="card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+          <div className="card" style={{ textAlign: 'center', padding: '40px 24px', marginBottom: 20 }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>
               {result.score >= 80 ? '🎉' : result.score >= 50 ? '👍' : '📘'}
             </div>
@@ -214,13 +219,68 @@ export default function QuizTaking() {
               คะแนน {result.score} / 100
             </div>
             {result.total > 0 && (
-              <div style={{ color: 'var(--text-3)', marginBottom: 24 }}>
+              <div style={{ color: 'var(--text-3)' }}>
                 ตอบถูก {result.correctCount} จาก {result.total} ข้อ
               </div>
             )}
-            <Link to="/student" className="btn btn-primary" style={{ display: 'inline-flex' }}>
-              กลับหน้าหลัก
-            </Link>
+          </div>
+
+          {/* เฉลยรายข้อ */}
+          <div className="card">
+            <div className="section-title" style={{ marginBottom: 16 }}>📖 เฉลยและคำอธิบาย</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {questions.map((q, i) => {
+                const chosen = answers[q.id]
+                const isCorrect = chosen === q.correct
+                return (
+                  <div
+                    key={q.id}
+                    style={{
+                      padding: '16px',
+                      borderRadius: 12,
+                      background: 'var(--bg-card-2)',
+                      border: `1px solid ${isCorrect ? 'rgba(63,185,80,0.35)' : 'rgba(224,82,82,0.35)'}`,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>ข้อที่ {i + 1}</div>
+                      <div style={{
+                        fontSize: 13, fontWeight: 700,
+                        color: isCorrect ? 'var(--success, #3fb950)' : 'var(--danger, #e05252)',
+                      }}>
+                        {isCorrect ? '✔ ตอบถูก' : '✘ ตอบผิด'}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 14, marginBottom: 10 }}>{q.question}</div>
+
+                    <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 4 }}>
+                      คำตอบของคุณ: <strong style={{ color: isCorrect ? 'var(--success, #3fb950)' : 'var(--danger, #e05252)' }}>
+                        {chosen ? `${chosen}. ${q.choices.find(c => c.letter === chosen)?.text ?? ''}` : 'ไม่ได้ตอบ'}
+                      </strong>
+                    </div>
+                    {!isCorrect && (
+                      <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 4 }}>
+                        เฉลยที่ถูกต้อง: <strong style={{ color: 'var(--success, #3fb950)' }}>
+                          {q.correct}. {q.choices.find(c => c.letter === q.correct)?.text ?? ''}
+                        </strong>
+                      </div>
+                    )}
+                    <div style={{
+                      fontSize: 13, color: 'var(--text-2, #ccc)', marginTop: 8,
+                      padding: '10px 12px', borderRadius: 8, background: 'rgba(0,212,255,0.06)',
+                    }}>
+                      💡 {q.answer}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+              <Link to="/student" className="btn btn-primary" style={{ display: 'inline-flex' }}>
+                กลับหน้าหลัก
+              </Link>
+            </div>
           </div>
         </div>
       </>
