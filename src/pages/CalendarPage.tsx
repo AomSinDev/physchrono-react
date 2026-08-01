@@ -125,22 +125,24 @@ export default function CalendarPage({ role }: CalendarPageProps) {
           }
         }
 
-        const list: Assignment[] = hwData.map(h => {
-          const content = h.h_content as { end_date?: string } | null
-          const dueDate = content?.end_date || toDateOnly(h.h_created_at)
-          const counts = countsBySubmit[h.h_id] || { total: 0, submitted: 0 }
+        const list: Assignment[] = hwData
+          .filter(h => (countsBySubmit[h.h_id]?.total ?? 0) > 0)
+          .map(h => {
+            const content = h.h_content as { end_date?: string } | null
+            const dueDate = content?.end_date || toDateOnly(h.h_created_at)
+            const counts = countsBySubmit[h.h_id] || { total: 0, submitted: 0 }
 
-          return {
-            id: h.h_id,
-            title: h.h_name,
-            subject: h.h_subject ?? '-',
-            dueDate,
-            dueTime: '-',
-            studentCount: counts.total,
-            submitted: counts.submitted,
-            priority: priorityOf(dueDate),
-          }
-        })
+            return {
+              id: h.h_id,
+              title: h.h_name,
+              subject: h.h_subject ?? '-',
+              dueDate,
+              dueTime: '-',
+              studentCount: counts.total,
+              submitted: counts.submitted,
+              priority: priorityOf(dueDate),
+            }
+          })
         setAssignments(list)
       }
     }
