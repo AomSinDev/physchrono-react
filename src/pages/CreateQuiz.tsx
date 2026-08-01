@@ -1,12 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import Header from '@/components/Header'
 import { BackIcon, PlusCircle } from '@/components/Icons'
 import { useAuth } from '@/hooks/useAuth'
-import { generateQuestions } from '@/lib/aiApi'
+import { generateQuestions, extractPdfText } from '@/lib/aiApi'
 import { supabase } from '@/lib/supabase'
 
-// หน่วยการเรียนฟิสิกส์
 const UNITS = [
   { id: 1,  title: 'การเคลื่อนที่แนวตรง',       chapter: 'บทที่ 1' },
   { id: 2,  title: 'การเคลื่อนที่แบบโพรเจกไทล์', chapter: 'บทที่ 2' },
@@ -45,6 +44,7 @@ function generateJoinCode() {
 export default function CreateQuiz() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [selectedUnit, setSelectedUnit] = useState<number | null>(null)
   const [startDate, setStartDate] = useState('')
@@ -57,6 +57,12 @@ export default function CreateQuiz() {
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null)
   const [newClassName, setNewClassName] = useState('')
   const [creatingClass, setCreatingClass] = useState(false)
+
+  // ── PDF ให้ AI อ่านประกอบการสร้างโจทย์ ──
+  const [pdfContext, setPdfContext] = useState('')
+  const [pdfFileNames, setPdfFileNames] = useState<string[]>([])
+  const [pdfExtracting, setPdfExtracting] = useState(false)
+  const [pdfError, setPdfError] = useState('')
 
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
@@ -114,6 +120,32 @@ export default function CreateQuiz() {
     }
   }
 
+  async function handlePdfChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    setPdfExtracting(true)
+    setPdfError('')
+    try {
+      const result = await extractPdfText(files)
+      setPdfContext(result.text)
+      setPdfFileNames(result.files)
+    } catch (err) {
+      console.error(err)
+      setPdfError(err instanceof Error ? err.message : 'อ่านไฟล์ PDF ไม่สำเร็จ')
+      setPdfContext('')
+      setPdfFileNames([])
+    } finally {
+      setPdfExtracting(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  function clearPdf() {
+    setPdfContext('')
+    setPdfFileNames([])
+    setPdfError('')
+  }
+
   async function handleGenerate() {
     if (!unit || !user) return
     if (!selectedClassId) {
@@ -125,17 +157,16 @@ export default function CreateQuiz() {
     setSuccessMsg('')
 
     try {
-      // 1. เรียก AI backend ให้สร้างโจทย์ตามหน่วยที่เลือก
-      const aiResult = await generateQuestions(unit.title, level, Number(count) || 10)
+      const aiResult = await generateQuestions(unit.title, level, Number(count) || 10, pdfContext)
 
       const homeworkContent = {
         questions: aiResult.questions,
         start_date: startDate,
         end_date: endDate,
         description,
+        source_files: pdfFileNames,
       }
 
-      // 2. บันทึกลงตาราง homework ใน Supabase — ขอ id กลับมาด้วย
       const { data: hwData, error: hwError } = await supabase
         .from('homework')
         .insert({
@@ -157,7 +188,6 @@ export default function CreateQuiz() {
         return
       }
 
-      // 3. มอบหมายงานให้นักเรียนทุกคนในห้องที่เลือก (สร้างแถวใน actives)
       const targetClass = classes.find(c => c.c_id === selectedClassId)
       const studentIds: number[] = targetClass?.c_students ?? []
 
@@ -201,7 +231,6 @@ export default function CreateQuiz() {
         </Link>
 
         <div className="card">
-          {/* หัวข้อ */}
           <div className="quiz-title-row">
             <div className="quiz-chip">{selectedUnit ?? '?'}</div>
             <div className="quiz-title-text">
@@ -236,7 +265,6 @@ export default function CreateQuiz() {
               </div>
             )}
 
-            {/* สร้างห้องเรียนใหม่แบบเร็ว */}
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
               <input
                 className="input"
@@ -256,25 +284,54 @@ export default function CreateQuiz() {
             </div>
           </div>
 
+          {/* แนบ PDF ให้ AI อ่านประกอบ */}
+          <div className="field" style={{ marginTop: 16 }}>
+            <label className="label">📄 แนบไฟล์ PDF ให้ AI อ้างอิง (ไม่บังคับ)</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf"
+              multiple
+              onChange={handlePdfChange}
+              disabled={pdfExtracting}
+              style={{ fontSize: 13, color: 'var(--text-3)' }}
+            />
+            {pdfExtracting && (
+              <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 6 }}>
+                กำลังอ่านไฟล์...
+              </div>
+            )}
+            {pdfError && (
+              <div style={{ fontSize: 13, color: 'var(--danger, #e05252)', marginTop: 6 }}>
+                ⚠️ {pdfError}
+              </div>
+            )}
+            {pdfFileNames.length > 0 && !pdfExtracting && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                fontSize: 13, color: 'var(--success, #3fb950)', marginTop: 6,
+              }}>
+                ✅ แนบแล้ว: {pdfFileNames.join(', ')} ({pdfContext.length.toLocaleString()} ตัวอักษร)
+                <button
+                  type="button"
+                  onClick={clearPdf}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  ลบไฟล์
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* ฟอร์มรายละเอียด */}
           <div className="form-grid">
             <div className="field">
               <label className="label">วันที่เริ่ม</label>
-              <input
-                className="input"
-                type="date"
-                value={startDate}
-                onChange={e => setStartDate(e.target.value)}
-              />
+              <input className="input" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
             </div>
             <div className="field">
               <label className="label">วันที่สิ้นสุด</label>
-              <input
-                className="input"
-                type="date"
-                value={endDate}
-                onChange={e => setEndDate(e.target.value)}
-              />
+              <input className="input" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
             </div>
             <div className="field">
               <label className="label">📚 หน่วยการเรียน</label>
@@ -286,30 +343,17 @@ export default function CreateQuiz() {
               >
                 <option value="">-- เลือกหน่วย --</option>
                 {UNITS.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.chapter} · {u.title}
-                  </option>
+                  <option key={u.id} value={u.id}>{u.chapter} · {u.title}</option>
                 ))}
               </select>
             </div>
             <div className="field">
               <label className="label">กำหนดข้อ</label>
-              <input
-                className="input"
-                type="number"
-                min={1} max={50}
-                value={count}
-                onChange={e => setCount(e.target.value)}
-              />
+              <input className="input" type="number" min={1} max={50} value={count} onChange={e => setCount(e.target.value)} />
             </div>
             <div className="field">
               <label className="label">ระดับความยาก</label>
-              <select
-                className="input"
-                value={level}
-                onChange={e => setLevel(e.target.value)}
-                style={{ cursor: 'pointer' }}
-              >
+              <select className="input" value={level} onChange={e => setLevel(e.target.value)} style={{ cursor: 'pointer' }}>
                 {LEVELS.map(l => (
                   <option key={l.value} value={l.value}>{l.label}</option>
                 ))}
