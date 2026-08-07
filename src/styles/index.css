@@ -389,6 +389,24 @@ h1, h2, h3, h4 { font-family: 'Orbitron', sans-serif; font-weight: 700; }
 .top-meta { font-size: 12px; color: var(--text-3); margin-top: 2px; }
 .top-count { font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--cyan); font-size: 16px; }
 
+.top-delete-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; flex-shrink: 0;
+  background: rgba(255, 59, 59, 0.16);
+  border: 1.5px solid rgba(255, 82, 82, 0.55);
+  border-radius: 10px; color: #ff5c5c;
+  cursor: pointer; transition: all 0.2s;
+  box-shadow: 0 0 0 rgba(255, 82, 82, 0);
+}
+.top-delete-btn svg { width: 18px; height: 18px; display: block; }
+.top-delete-btn:hover {
+  background: #ff5252; border-color: #ff5252; color: #fff;
+  box-shadow: 0 0 12px rgba(255, 82, 82, 0.5);
+  transform: scale(1.06);
+}
+.top-delete-btn:active { transform: scale(0.96); }
+.top-delete-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
 .add-quiz {
   background: linear-gradient(160deg, rgba(0, 212, 255, 0.1), rgba(33, 150, 243, 0.05));
   border: 1.5px dashed rgba(0, 212, 255, 0.4);
