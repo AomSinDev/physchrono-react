@@ -69,12 +69,20 @@ export default function StudentDashboard() {
     if (!user) return
     setLoadingData(true)
 
-    const { data, error } = await supabase
-      .from('actives')
-      .select('a_id, a_score, a_type, a_homework, homework(h_name, h_created_at)')
-      .eq('a_sid', user.id)
-      .order('a_id', { ascending: false })
+    const [activesRes, studentRes] = await Promise.all([
+      supabase
+        .from('actives')
+        .select('a_id, a_score, a_type, a_homework, homework(h_name, h_created_at)')
+        .eq('a_sid', user.id)
+        .order('a_id', { ascending: false }),
+      supabase
+        .from('students')
+        .select('s_streak_points')
+        .eq('s_id', user.id)
+        .maybeSingle(),
+    ])
 
+    const { data, error } = activesRes
     if (error) {
       console.error('load actives error:', error)
       setLoadingData(false)
@@ -120,7 +128,7 @@ export default function StudentDashboard() {
       totalDone: doneCards.length,
       totalScore,
       bestScore,
-      streak: user.role === 'student' ? 0 : 0, // TODO: ดึงจาก s_streak_points ถ้าต้องการ
+      streak: studentRes.data?.s_streak_points ?? 0,
       overallProgress,
       quizCards,
     })
