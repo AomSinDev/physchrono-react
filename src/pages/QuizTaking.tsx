@@ -56,8 +56,10 @@ export default function QuizTaking() {
 
   const [currentIndex, setCurrentIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<number, string>>({})
-  const [streak, setStreak] = useState(0)
-  const [bestStreak, setBestStreak] = useState(0)
+
+  // ── Streak: นับต่อเนื่องข้ามชุดฝึก ไม่รีเซ็ตทุกครั้งที่เริ่มใหม่ ──
+  const [streak, setStreak] = useState(0)          // ค่าปัจจุบัน (ต่อจากที่เคยทำมา)
+  const [bestStreak, setBestStreak] = useState(0)  // สถิติสูงสุดตลอดกาลของนักเรียนคนนี้
 
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ score: number; correctCount: number; total: number } | null>(null)
@@ -74,12 +76,19 @@ export default function QuizTaking() {
 
   async function loadActive() {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('actives')
-      .select('a_id, a_sid, a_type, a_score, a_homework, homework(h_name)')
-      .eq('a_id', activeId)
-      .maybeSingle()
 
+    const [activeRes, studentRes] = await Promise.all([
+      supabase
+        .from('actives')
+        .select('a_id, a_sid, a_type, a_score, a_homework, homework(h_name)')
+        .eq('a_id', activeId)
+        .maybeSingle(),
+      user
+        ? supabase.from('students').select('s_streak_points, s_best_streak').eq('s_id', user.id).maybeSingle()
+        : Promise.resolve({ data: null, error: null } as any),
+    ])
+
+    const { data, error } = activeRes
     if (error || !data) {
       setErrorMsg('โหลดชุดฝึกไม่สำเร็จ กรุณาลองใหม่')
       setLoading(false)
@@ -87,6 +96,12 @@ export default function QuizTaking() {
     }
 
     setActive(data as ActiveRow)
+
+    // เริ่ม streak ต่อจากค่าที่นักเรียนสะสมไว้ก่อนหน้า (ไม่เริ่มจาก 0 ทุกครั้ง)
+    const currentStreak = studentRes?.data?.s_streak_points ?? 0
+    const currentBest = studentRes?.data?.s_best_streak ?? 0
+    setStreak(currentStreak)
+    setBestStreak(Math.max(currentStreak, currentBest))
 
     // ถ้าเคยส่งคำตอบไปแล้ว ให้แสดงผลลัพธ์ + เฉลยเดิมทันที
     if (data.a_type === 'submitted' || data.a_type === 'done') {
@@ -152,7 +167,6 @@ export default function QuizTaking() {
         .update({
           a_score: score,
           a_type: 'submitted',
-          a_best_streak: bestStreak,
           a_submitted_at: new Date().toISOString(),
           a_homework: { ...active.a_homework, student_answers: answers },
         })
@@ -162,6 +176,20 @@ export default function QuizTaking() {
         console.error('submit error:', error)
         setErrorMsg('ส่งคำตอบไม่สำเร็จ กรุณาลองใหม่')
         return
+      }
+
+      // บันทึก streak ต่อเนื่อง + สถิติสูงสุดกลับเข้าโปรไฟล์นักเรียน
+      const { error: streakError } = await supabase
+        .from('students')
+        .update({
+          s_streak_points: streak,
+          s_best_streak: bestStreak,
+        })
+        .eq('s_id', user.id)
+
+      if (streakError) {
+        console.error('streak update error:', streakError)
+        // ไม่ block การแสดงผลคะแนน แม้บันทึก streak ไม่สำเร็จ
       }
 
       setResult({ score, correctCount, total })
@@ -223,6 +251,9 @@ export default function QuizTaking() {
                 ตอบถูก {result.correctCount} จาก {result.total} ข้อ
               </div>
             )}
+            <div style={{ marginTop: 14, fontSize: 14, color: 'var(--cyan)' }}>
+              🔥 Streak ปัจจุบัน: {streak} ข้อติด (สถิติสูงสุด {bestStreak} ข้อ)
+            </div>
           </div>
 
           {/* เฉลยรายข้อ */}
@@ -337,7 +368,7 @@ export default function QuizTaking() {
           <div style={{ marginTop: 16 }}>
             <div className="streak-mini">
               <span className="flame">🔥</span>
-              <span>Streak ปัจจุบัน: {streak} ข้อติด</span>
+              <span>Streak ต่อเนื่อง: {streak} ข้อติด (สูงสุด {bestStreak} ข้อ)</span>
             </div>
           </div>
         </div>
