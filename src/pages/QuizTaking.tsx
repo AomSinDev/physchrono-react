@@ -381,7 +381,7 @@ export default function QuizTaking() {
           <div style={{ marginTop: 16 }}>
             <div className="streak-mini">
               <span className="flame">🔥</span>
-              <span>Streak ต่อเนื่อง: {streak} ข้อติด (สูงสุด {bestStreak} ข้อ)</span>
+              <span>Streak ต่อเนื่อง: {streak} ข้อติด (สูงสุด {questions.length} ข้อ)</span>
             </div>
           </div>
         </div>
