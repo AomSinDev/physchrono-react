@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import { Link } from 'react-router-dom'
 import Header from '@/components/Header'
-import { HomeIcon, BookIcon, CalendarIcon, PlusFile } from '@/components/Icons'
+import { HomeIcon, BookIcon, CalendarIcon, PlusFile, TrashIcon, FlameIcon } from '@/components/Icons'
 import { supabase } from '@/lib/supabase'
 
 interface ClassRow {
@@ -24,6 +24,7 @@ interface ScoreRow {
   a_cid: number
   a_score: number
   a_type: string
+  a_best_streak: number
   student_name: string
 }
 
@@ -37,6 +38,7 @@ export default function TeacherDashboard() {
 
   const [filterClassId, setFilterClassId] = useState<number | 'all'>('all')
   const [filterHwId, setFilterHwId] = useState<number | null>(null)
+  const [deletingHwId, setDeletingHwId] = useState<number | null>(null)
 
   useEffect(() => {
     if (user) loadData()
@@ -69,7 +71,7 @@ export default function TeacherDashboard() {
       if (hwIds.length > 0) {
         const { data: activesData } = await supabase
           .from('actives')
-          .select('a_hid, a_cid, a_score, a_type, students(s_fullname)')
+          .select('a_hid, a_cid, a_score, a_type, a_best_streak, students(s_fullname)')
           .in('a_hid', hwIds)
 
         if (activesData) {
@@ -84,6 +86,7 @@ export default function TeacherDashboard() {
               a_cid: row.a_cid,
               a_score: row.a_score ?? 0,
               a_type: row.a_type,
+              a_best_streak: row.a_best_streak ?? 0,
               student_name: student?.s_fullname ?? 'ไม่ทราบชื่อ',
             })
           }
@@ -106,6 +109,31 @@ export default function TeacherDashboard() {
     }
 
     setLoadingData(false)
+  }
+
+  async function handleDeleteHomework(h: HomeworkRow) {
+    const ok = window.confirm(`ต้องการลบชุดฝึก "${h.h_name}" ใช่หรือไม่?\nข้อมูลคะแนนและการมอบหมายที่เกี่ยวข้องจะถูกลบทั้งหมด และไม่สามารถกู้คืนได้`)
+    if (!ok) return
+
+    setDeletingHwId(h.h_id)
+    try {
+      const { error } = await supabase.from('homework').delete().eq('h_id', h.h_id)
+      if (error) throw error
+
+      setHomeworks(prev => prev.filter(x => x.h_id !== h.h_id))
+      setScoreRows(prev => prev.filter(r => r.a_hid !== h.h_id))
+      setAssignedCount(prev => {
+        const next = { ...prev }
+        delete next[h.h_id]
+        return next
+      })
+      if (filterHwId === h.h_id) setFilterHwId(null)
+    } catch (err) {
+      console.error(err)
+      window.alert('ลบชุดฝึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง')
+    } finally {
+      setDeletingHwId(null)
+    }
   }
 
   function formatDate(iso: string) {
@@ -246,6 +274,13 @@ export default function TeacherDashboard() {
                     {!submitted && (
                       <div style={{ fontSize: 10, color: 'var(--text-3)' }}>ยังไม่ส่ง</div>
                     )}
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 3, marginTop: 6,
+                      fontSize: 11, fontWeight: 700, color: r.a_best_streak > 0 ? '#ff9b3d' : 'var(--text-3)',
+                    }} title="ตอบถูกต่อเนื่องสูงสุด">
+                      <span style={{ width: 12, height: 12, display: 'inline-flex' }}><FlameIcon /></span>
+                      {r.a_best_streak}
+                    </div>
                   </div>
                 )
               })}
@@ -272,6 +307,16 @@ export default function TeacherDashboard() {
                       <div className="top-meta">{h.h_subject} · สร้างเมื่อ {formatDate(h.h_created_at)}</div>
                     </div>
                     <div className="top-count">{assignedCount[h.h_id] ?? 0} คน</div>
+                    <button
+                      type="button"
+                      className="top-delete-btn"
+                      title="ลบชุดฝึก"
+                      aria-label="ลบชุดฝึก"
+                      disabled={deletingHwId === h.h_id}
+                      onClick={() => handleDeleteHomework(h)}
+                    >
+                      <TrashIcon />
+                    </button>
                   </div>
                 ))}
               </div>
