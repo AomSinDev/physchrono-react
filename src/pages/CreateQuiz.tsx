@@ -27,6 +27,19 @@ const LEVELS = [
   { value: '3', label: 'ยาก' },
 ]
 
+interface Choice {
+  letter: string
+  text: string
+}
+
+interface Question {
+  id: number
+  question: string
+  choices: Choice[]
+  correct: string
+  answer: string
+}
+
 interface ClassRow {
   c_id: number
   c_name: string
@@ -65,8 +78,12 @@ export default function CreateQuiz() {
   const [pdfError, setPdfError] = useState('')
 
   const [loading, setLoading] = useState(false)
+  const [publishing, setPublishing] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
+
+  // ── ตัวอย่างโจทย์ก่อนเผยแพร่ ──
+  const [previewQuestions, setPreviewQuestions] = useState<Question[] | null>(null)
 
   const unit = UNITS.find(u => u.id === selectedUnit)
 
@@ -155,12 +172,47 @@ export default function CreateQuiz() {
     setLoading(true)
     setErrorMsg('')
     setSuccessMsg('')
+    setPreviewQuestions(null)
 
     try {
       const aiResult = await generateQuestions(unit.title, level, Number(count) || 10, pdfContext)
+      const qs: Question[] = aiResult.questions ?? []
+      if (qs.length === 0) {
+        setErrorMsg('ไม่สามารถสร้างโจทย์ได้ กรุณาลองใหม่')
+        return
+      }
+      setPreviewQuestions(qs)
+    } catch (err) {
+      console.error('Generate error:', err)
+      setErrorMsg('สร้างโจทย์ไม่สำเร็จ กรุณาลองใหม่ (อาจเกิดจากเซิร์ฟเวอร์ AI กำลังปลุกตัวเอง รอสักครู่แล้วลองอีกครั้ง)')
+    } finally {
+      setLoading(false)
+    }
+  }
 
+  function handleRemoveQuestion(id: number) {
+    setPreviewQuestions(prev => (prev ? prev.filter(q => q.id !== id) : prev))
+  }
+
+  function handleDiscardPreview() {
+    setPreviewQuestions(null)
+    setErrorMsg('')
+    setSuccessMsg('')
+  }
+
+  async function handlePublish() {
+    if (!unit || !user || !previewQuestions || previewQuestions.length === 0) return
+    if (!selectedClassId) {
+      setErrorMsg('กรุณาเลือกหรือสร้างห้องเรียนก่อน')
+      return
+    }
+    setPublishing(true)
+    setErrorMsg('')
+    setSuccessMsg('')
+
+    try {
       const homeworkContent = {
-        questions: aiResult.questions,
+        questions: previewQuestions,
         start_date: startDate,
         end_date: endDate,
         description,
@@ -206,17 +258,17 @@ export default function CreateQuiz() {
           setErrorMsg('สร้างชุดฝึกสำเร็จ แต่มอบหมายให้นักเรียนไม่สำเร็จบางส่วน')
           return
         }
-        setSuccessMsg(`สร้างชุดฝึกและมอบหมายให้นักเรียน ${studentIds.length} คนเรียบร้อยแล้ว`)
+        setSuccessMsg(`เผยแพร่และมอบหมายให้นักเรียน ${studentIds.length} คนเรียบร้อยแล้ว`)
       } else {
-        setSuccessMsg('สร้างชุดฝึกสำเร็จ แต่ห้องนี้ยังไม่มีนักเรียนเข้าร่วม (แชร์รหัสห้องให้นักเรียนก่อน)')
+        setSuccessMsg('เผยแพร่ชุดฝึกสำเร็จ แต่ห้องนี้ยังไม่มีนักเรียนเข้าร่วม (แชร์รหัสห้องให้นักเรียนก่อน)')
       }
 
       setTimeout(() => navigate('/teacher'), 1500)
     } catch (err) {
-      console.error('Generate error:', err)
-      setErrorMsg('สร้างโจทย์ไม่สำเร็จ กรุณาลองใหม่ (อาจเกิดจากเซิร์ฟเวอร์ AI กำลังปลุกตัวเอง รอสักครู่แล้วลองอีกครั้ง)')
+      console.error('Publish error:', err)
+      setErrorMsg('เผยแพร่ไม่สำเร็จ กรุณาลองใหม่')
     } finally {
-      setLoading(false)
+      setPublishing(false)
     }
   }
 
@@ -244,7 +296,7 @@ export default function CreateQuiz() {
           </div>
 
           {/* เลือกห้องเรียน */}
-          <div className="field" style={{ marginTop: 16 }}>
+          <div className="field" style={{ marginTop: 16, opacity: previewQuestions ? 0.5 : 1, pointerEvents: previewQuestions ? 'none' : 'auto' }}>
             <label className="label">🏫 มอบหมายให้ห้องเรียน</label>
             {classes.length > 0 ? (
               <select
@@ -285,7 +337,7 @@ export default function CreateQuiz() {
           </div>
 
           {/* แนบ PDF ให้ AI อ่านประกอบ */}
-          <div className="field" style={{ marginTop: 16 }}>
+          <div className="field" style={{ marginTop: 16, opacity: previewQuestions ? 0.5 : 1, pointerEvents: previewQuestions ? 'none' : 'auto' }}>
             <label className="label">📄 แนบไฟล์ PDF ให้ AI อ้างอิง (ไม่บังคับ)</label>
             <input
               ref={fileInputRef}
@@ -324,7 +376,7 @@ export default function CreateQuiz() {
           </div>
 
           {/* ฟอร์มรายละเอียด */}
-          <div className="form-grid">
+          <div className="form-grid" style={{ opacity: previewQuestions ? 0.5 : 1, pointerEvents: previewQuestions ? 'none' : 'auto' }}>
             <div className="field">
               <label className="label">วันที่เริ่ม</label>
               <input className="input" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
@@ -361,7 +413,7 @@ export default function CreateQuiz() {
             </div>
           </div>
 
-          <div className="field">
+          <div className="field" style={{ opacity: previewQuestions ? 0.5 : 1, pointerEvents: previewQuestions ? 'none' : 'auto' }}>
             <label className="label">คำอธิบาย</label>
             <textarea
               className="textarea"
@@ -382,23 +434,119 @@ export default function CreateQuiz() {
             </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
-            <button
-              className="btn btn-primary"
-              style={{ padding: '16px 40px', fontSize: 16, opacity: selectedUnit && selectedClassId && !loading ? 1 : 0.4 }}
-              disabled={!selectedUnit || !selectedClassId || loading}
-              onClick={handleGenerate}
-            >
-              <PlusCircle />
-              {loading ? 'กำลังสร้างโจทย์... (อาจใช้เวลาสักครู่)' : 'สร้างโจทย์อัตโนมัติ'}
-            </button>
-          </div>
-          {(!selectedUnit || !selectedClassId) && (
-            <div style={{ textAlign: 'center', marginTop: 10, fontSize: 13, color: 'var(--text-3)' }}>
-              กรุณาเลือกหน่วยการเรียนและห้องเรียนก่อน
-            </div>
+          {!previewQuestions && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+                <button
+                  className="btn btn-primary"
+                  style={{ padding: '16px 40px', fontSize: 16, opacity: selectedUnit && selectedClassId && !loading ? 1 : 0.4 }}
+                  disabled={!selectedUnit || !selectedClassId || loading}
+                  onClick={handleGenerate}
+                >
+                  <PlusCircle />
+                  {loading ? 'กำลังสร้างโจทย์... (อาจใช้เวลาสักครู่)' : 'สร้างโจทย์ (ดูตัวอย่างก่อนเผยแพร่)'}
+                </button>
+              </div>
+              {(!selectedUnit || !selectedClassId) && (
+                <div style={{ textAlign: 'center', marginTop: 10, fontSize: 13, color: 'var(--text-3)' }}>
+                  กรุณาเลือกหน่วยการเรียนและห้องเรียนก่อน
+                </div>
+              )}
+            </>
           )}
         </div>
+
+        {previewQuestions && (
+          <div className="card" style={{ marginTop: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>
+                👀 ตัวอย่างโจทย์ก่อนเผยแพร่ ({previewQuestions.length} ข้อ)
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 16 }}>
+              ตรวจสอบโจทย์ ตัวเลือก และเฉลยด้านล่าง — ลบข้อที่ไม่ต้องการได้ก่อนกดเผยแพร่ นักเรียนจะยังไม่เห็นโจทย์นี้จนกว่าจะกด "เผยแพร่ให้นักเรียน"
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {previewQuestions.map((q, i) => (
+                <div
+                  key={q.id}
+                  style={{
+                    border: '1px solid var(--border, rgba(255,255,255,0.08))',
+                    borderRadius: 12, padding: 16, position: 'relative',
+                    background: 'rgba(255,255,255,0.02)',
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveQuestion(q.id)}
+                    title="ลบข้อนี้ออกจากตัวอย่าง"
+                    style={{
+                      position: 'absolute', top: 12, right: 12,
+                      width: 28, height: 28, borderRadius: 8,
+                      background: 'rgba(255, 82, 82, 0.12)', border: '1px solid rgba(255, 82, 82, 0.3)',
+                      color: '#ff6b6b', cursor: 'pointer', fontSize: 14, lineHeight: '26px',
+                    }}
+                  >
+                    ✕
+                  </button>
+                  <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 6 }}>ข้อที่ {i + 1}</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, paddingRight: 32 }}>
+                    {q.question}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+                    {q.choices.map(c => {
+                      const isCorrect = c.letter === q.correct
+                      return (
+                        <div
+                          key={c.letter}
+                          style={{
+                            display: 'flex', gap: 8, alignItems: 'flex-start',
+                            fontSize: 14, padding: '6px 10px', borderRadius: 8,
+                            background: isCorrect ? 'rgba(63, 185, 80, 0.12)' : 'transparent',
+                            border: isCorrect ? '1px solid rgba(63, 185, 80, 0.35)' : '1px solid transparent',
+                            color: isCorrect ? '#3fb950' : 'var(--text-2, #ccc)',
+                            fontWeight: isCorrect ? 700 : 400,
+                          }}
+                        >
+                          <span>{c.letter}.</span>
+                          <span>{c.text}</span>
+                          {isCorrect && <span style={{ marginLeft: 'auto' }}>✓ เฉลย</span>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {q.answer && (
+                    <div style={{ fontSize: 13, color: 'var(--text-3)', borderTop: '1px dashed var(--border, rgba(255,255,255,0.1))', paddingTop: 8 }}>
+                      💡 {q.answer}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {previewQuestions.length === 0 && (
+              <div style={{ textAlign: 'center', color: 'var(--text-3)', fontSize: 14, padding: '20px 0' }}>
+                ไม่เหลือโจทย์ในชุดนี้แล้ว กรุณาสร้างใหม่
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 20, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-ghost" onClick={handleDiscardPreview} disabled={publishing}>
+                ← กลับไปแก้ไข / สร้างใหม่
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ padding: '14px 32px', fontSize: 16, opacity: previewQuestions.length > 0 && !publishing ? 1 : 0.4 }}
+                disabled={previewQuestions.length === 0 || publishing}
+                onClick={handlePublish}
+              >
+                {publishing ? 'กำลังเผยแพร่...' : '✅ เผยแพร่ให้นักเรียน'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </>
   )
