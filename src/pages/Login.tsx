@@ -10,8 +10,8 @@ export default function Login() {
   const { login } = useAuth()
 
   const [role, setRole] = useState<UserRole>('student')
-  const [email, setEmail] = useState('maxs@school.ac.th')
-  const [password, setPassword] = useState('password123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -30,10 +30,8 @@ export default function Login() {
     }
   }
 
-  // เปลี่ยน email อัตโนมัติเมื่อสลับ role (เพื่อความสะดวกในการ test)
   const handleRoleChange = (newRole: UserRole) => {
     setRole(newRole)
-    setEmail(newRole === 'teacher' ? 'max@school.ac.th' : 'maxs@school.ac.th')
   }
 
   return (
@@ -74,6 +72,7 @@ export default function Login() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             disabled={loading}
+            autoComplete="off"
           />
         </div>
         <div className="field">
@@ -86,6 +85,7 @@ export default function Login() {
             onChange={(e) => setPassword(e.target.value)}
             disabled={loading}
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+            autoComplete="new-password"
           />
         </div>
 
