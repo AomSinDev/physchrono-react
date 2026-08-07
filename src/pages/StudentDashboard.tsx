@@ -23,6 +23,7 @@ interface QuizCard {
   progress: number
   dueDate: string
   score: number
+  bestStreak: number
 }
 
 interface StudentStats {
@@ -59,6 +60,7 @@ export default function StudentDashboard() {
   const [joinCode, setJoinCode] = useState('')
   const [joinMsg, setJoinMsg] = useState('')
   const [joining, setJoining] = useState(false)
+  const [showStreakDetail, setShowStreakDetail] = useState(false)
 
   useEffect(() => {
     if (user) loadStats()
@@ -72,7 +74,7 @@ export default function StudentDashboard() {
     const [activesRes, studentRes] = await Promise.all([
       supabase
         .from('actives')
-        .select('a_id, a_score, a_type, a_homework, homework(h_name, h_created_at)')
+        .select('a_id, a_score, a_type, a_best_streak, a_homework, homework(h_name, h_created_at)')
         .eq('a_sid', user.id)
         .order('a_id', { ascending: false }),
       supabase
@@ -93,6 +95,7 @@ export default function StudentDashboard() {
       a_id: number
       a_score: number
       a_type: string
+      a_best_streak: number
       a_homework: { start_date?: string; end_date?: string } | null
       homework: { h_name: string; h_created_at: string } | { h_name: string; h_created_at: string }[] | null
     }
@@ -114,6 +117,7 @@ export default function StudentDashboard() {
         progress,
         dueDate: formatDate(row.a_homework?.end_date),
         score: row.a_score ?? 0,
+        bestStreak: row.a_best_streak ?? 0,
       }
     })
 
@@ -240,14 +244,58 @@ export default function StudentDashboard() {
             </div>
             <div className="stat-label">คะแนนที่ทำได้ดีที่สุด</div>
           </div>
-          <div className="stat-card streak-card">
+          <div
+            className="stat-card streak-card"
+            onClick={() => setShowStreakDetail(v => !v)}
+            style={{ cursor: 'pointer' }}
+          >
             <div className="stat-icon"><FlameIcon /></div>
             <div className="stat-value">
               {loadingData ? <span style={{ color: 'var(--text-3)' }}>—</span> : <Counter target={stats.streak} />}
             </div>
-            <div className="stat-label">สถิติตอบถูกต่อเนื่อง</div>
+            <div className="stat-label">
+              สถิติตอบถูกต่อเนื่อง
+              <span style={{ marginLeft: 4, fontSize: 11, color: 'var(--cyan)' }}>
+                {showStreakDetail ? '▲ ซ่อน' : '▼ ดูรายชุด'}
+              </span>
+            </div>
           </div>
         </div>
+
+        {/* รายละเอียด Streak แยกตามชุดฝึก */}
+        {showStreakDetail && (
+          <div className="card" style={{ marginBottom: 20 }}>
+            <div className="section-title" style={{ marginBottom: 12 }}>
+              🔥 ตอบถูกต่อเนื่องสูงสุด แยกตามชุดฝึก
+            </div>
+            {stats.quizCards.filter(q => q.progress === 100).length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-3)', fontSize: 14 }}>
+                ยังไม่มีชุดฝึกที่ทำเสร็จ
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {[...stats.quizCards]
+                  .filter(q => q.progress === 100)
+                  .sort((a, b) => b.bestStreak - a.bestStreak)
+                  .map(q => (
+                    <div
+                      key={q.activeId}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '10px 14px', borderRadius: 10,
+                        background: 'var(--bg-card-2)',
+                      }}
+                    >
+                      <div style={{ fontSize: 14 }}>{q.title}</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--cyan)', whiteSpace: 'nowrap' }}>
+                        🔥 {q.bestStreak} ข้อติด
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Progress Bar */}
         <div className="progress-card">
