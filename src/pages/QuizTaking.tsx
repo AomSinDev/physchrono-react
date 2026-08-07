@@ -31,6 +31,7 @@ interface ActiveRow {
   a_sid: number
   a_type: string
   a_score: number
+  a_best_streak: number
   a_homework: HomeworkContent
   homework: { h_name: string } | { h_name: string }[] | null
 }
@@ -61,6 +62,10 @@ export default function QuizTaking() {
   const [streak, setStreak] = useState(0)          // ค่าปัจจุบัน (ต่อจากที่เคยทำมา)
   const [bestStreak, setBestStreak] = useState(0)  // สถิติสูงสุดตลอดกาลของนักเรียนคนนี้
 
+  // ── Streak เฉพาะชุดฝึกนี้ (เริ่มนับใหม่จาก 0 ทุกครั้ง ใช้รายงานแยกรายชุด) ──
+  const [localStreak, setLocalStreak] = useState(0)
+  const [localBestStreak, setLocalBestStreak] = useState(0)
+
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ score: number; correctCount: number; total: number } | null>(null)
 
@@ -80,7 +85,7 @@ export default function QuizTaking() {
     const [activeRes, studentRes] = await Promise.all([
       supabase
         .from('actives')
-        .select('a_id, a_sid, a_type, a_score, a_homework, homework(h_name)')
+        .select('a_id, a_sid, a_type, a_score, a_best_streak, a_homework, homework(h_name)')
         .eq('a_id', activeId)
         .maybeSingle(),
       user
@@ -109,6 +114,7 @@ export default function QuizTaking() {
       const savedAnswers: Record<number, string> = data.a_homework?.student_answers ?? {}
       const correctCount = qs.filter(q => savedAnswers[q.id] === q.correct).length
       setAnswers(savedAnswers)
+      setLocalBestStreak(data.a_best_streak ?? 0)
       setResult({ score: data.a_score ?? 0, correctCount, total: qs.length })
     }
 
@@ -139,8 +145,14 @@ export default function QuizTaking() {
           setBestStreak(b => Math.max(b, next))
           return next
         })
+        setLocalStreak(s => {
+          const next = s + 1
+          setLocalBestStreak(b => Math.max(b, next))
+          return next
+        })
       } else {
         setStreak(0)
+        setLocalStreak(0)
       }
     }
     if (currentIndex < questions.length - 1) {
@@ -167,6 +179,7 @@ export default function QuizTaking() {
         .update({
           a_score: score,
           a_type: 'submitted',
+          a_best_streak: localBestStreak,
           a_submitted_at: new Date().toISOString(),
           a_homework: { ...active.a_homework, student_answers: answers },
         })
@@ -252,7 +265,7 @@ export default function QuizTaking() {
               </div>
             )}
             <div style={{ marginTop: 14, fontSize: 14, color: 'var(--cyan)' }}>
-              🔥 Streak ปัจจุบัน: {streak} ข้อติด (สถิติสูงสุด {bestStreak} ข้อ)
+              🔥 ตอบถูกต่อเนื่องสูงสุดในชุดนี้: {localBestStreak} ข้อ
             </div>
           </div>
 
