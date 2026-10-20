@@ -5,6 +5,23 @@ import { BackIcon, PlusCircle } from '@/components/Icons'
 import { useAuth } from '@/hooks/useAuth'
 import { generateQuestions, extractPdfText } from '@/lib/aiApi'
 import { supabase } from '@/lib/supabase'
+import { BackIcon, PlusCircle, CalendarIcon } from '@/components/Icons'
+
+function DateField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="date-field">
+      <input
+        className="input"
+        type="date"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+      />
+      <span className="date-field-icon">
+        <CalendarIcon />
+      </span>
+    </div>
+  )
+}
 
 const UNITS = [
   { id: 1,  title: 'การเคลื่อนที่แนวตรง',       chapter: 'บทที่ 1' },
@@ -379,11 +396,11 @@ export default function CreateQuiz() {
           <div className="form-grid" style={{ opacity: previewQuestions ? 0.5 : 1, pointerEvents: previewQuestions ? 'none' : 'auto' }}>
             <div className="field">
               <label className="label">วันที่เริ่ม</label>
-              <input className="input" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+              <DateField value={startDate} onChange={setStartDate} />
             </div>
             <div className="field">
               <label className="label">วันที่สิ้นสุด</label>
-              <input className="input" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+              <DateField value={endDate} onChange={setEndDate} />
             </div>
             <div className="field">
               <label className="label">📚 หน่วยการเรียน</label>
